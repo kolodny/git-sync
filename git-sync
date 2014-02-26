@@ -1,0 +1,88 @@
+#!/bin/sh
+
+GIT_COMMAND=git
+TIMESTAMP=$(date +%Y%m%d%H%M%S)
+
+if [ "$1" == "setup" ]; then
+	echo setting up
+	exit
+fi
+
+if [ "$1" == "up" ]; then
+	$GIT_COMMAND checkout '.__sync__*' &> /dev/null
+	GIT_STATUS=$($GIT_COMMAND status --porcelain)
+	DIRTY=${#GIT_STATUS}
+	if [ "$DIRTY" = "0" ]; then
+	    echo No changes detected
+	    rm .__sync__* &> /dev/null
+	    exit
+	fi
+
+	echo syncing up
+
+	HASH=$(echo -e "up $HOSTNAME $TIMESTAMP" | git hash-object --stdin -w)	
+	BRANCH_NAME=__sync__$HASH
+	FILE=.$BRANCH_NAME
+
+	$GIT_COMMAND checkout -b $BRANCH_NAME &> /dev/null
+	find . \( ! -regex '.*/\..*' \) -type d -empty -exec touch {}/.gitignore \; > /dev/null
+	$GIT_COMMAND cat-file -p $HASH > $FILE
+	$GIT_COMMAND add -u &> /dev/null
+	$GIT_COMMAND add . -f &> /dev/null
+	$GIT_COMMAND commit -m "\"syncing up on $TIMESTAMP from $HOSTNAME\"" 2>&1 > /dev/null
+	$GIT_COMMAND push origin $BRANCH_NAME
+	rm .__sync__* &> /dev/null
+	exit
+fi
+
+if [ "$1" == "down" ]; then
+	$GIT_COMMAND checkout '.__sync__*' &> /dev/null
+	CURRENT_BRANCH_NAME=$($GIT_COMMAND rev-parse --abbrev-ref HEAD)
+	HASH=$(echo -e "down $HOSTNAME $TIMESTAMP $CURRENT_BRANCH_NAME" | git hash-object --stdin -w)	
+	BRANCH_NAME=__sync__$HASH
+	FILE=.$BRANCH_NAME
+
+	$GIT_COMMAND checkout -b $BRANCH_NAME &> /dev/null
+	$GIT_COMMAND cat-file -p $HASH > $FILE
+	$GIT_COMMAND add $FILE &> /dev/null
+	$GIT_COMMAND commit -m "\"syncing down on $TIMESTAMP from $HOSTNAME\"" &> /dev/null
+	BRANCH_TO_CHECKOUT=$(git push origin $BRANCH_NAME 2>&1 | head -n 1 | cut -d' ' -f 2-)
+	echo BRANCH_TO_CHECKOUT = $BRANCH_TO_CHECKOUT
+	if [ "$BRANCH_TO_CHECKOUT" == "" ]; then
+		echo no need to sync down, already up to date
+		$GIT_COMMAND checkout $CURRENT_BRANCH_NAME &> /dev/null
+	else
+		echo we need to checkout $BRANCH_TO_CHECKOUT
+		$GIT_COMMAND fetch
+		$GIT_COMMAND checkout "$BRANCH_TO_CHECKOUT"
+		echo $GIT_COMMAND clean -xdfn
+	fi
+	rm .__sync__* &> /dev/null
+	exit
+fi
+
+if [ "$1" == "status" ]; then
+	echo getting status
+	exit
+fi
+
+
+if [ "$1" == "ignore" ]; then
+	if [ "$2" == "local" ]; then
+		echo 'ignoring local file(s):' ${@:3}
+		exit
+	fi
+
+	if [ "$2" == "remote" ]; then
+		echo 'ignore remote file(s):' ${@:3}
+		exit
+	fi
+fi
+
+
+echo -e "usage:"
+echo -e "\tgit sync setup"
+echo -e "\tgit sync up"
+echo -e "\tgit sync down"
+echo -e "\tgit sync ignore local <file-or-dir>"
+echo -e "\tgit sync ignore remote <file-or-dir>"

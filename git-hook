@@ -1,0 +1,58 @@
+#!/bin/sh
+#post-receive hook
+
+if ! [ -t 0 ]; then
+  read -a ref
+fi
+
+IFS='/' read -ra REF <<< "${ref[2]}"
+CLIENT_BRANCH_NAME="${REF[2]}"
+
+HASH=${CLIENT_BRANCH_NAME:8}
+
+TIMESTAMP=$(date +%Y%m%d%H%M%S)
+PWD=$(pwd)
+WORK_TREE=$(dirname $PWD)
+GIT_COMMAND="git --git-dir=$PWD --work-tree=$WORK_TREE"
+
+IFS=$' ' META=($($GIT_COMMAND cat-file -p $HASH))
+
+SERVER_BRANCH_NAME=$($GIT_COMMAND rev-parse --abbrev-ref HEAD)
+
+if [ "${META[0]}" = "up" ]; then
+	(cd $WORK_TREE && $GIT_COMMAND checkout -f $CLIENT_BRANCH_NAME)
+	(cd $WORK_TREE && $GIT_COMMAND clean -xdfn)
+	rm $WORK_TREE/.__sync__*
+	exit 0
+fi
+
+if [ "${META[0]}" = "down" ]; then
+	(cd $WORK_TREE && $GIT_COMMAND checkout '.__sync__*' &> /dev/null)
+	GIT_STATUS=$($GIT_COMMAND status --porcelain)
+	DIRTY=${#GIT_STATUS}
+	if [ "$DIRTY" != "0" ]; then
+		# we need to commit whats in the current dir
+		
+		HASH=$(echo -e "pull $HOSTNAME $TIMESTAMP" | git hash-object --stdin -w)	
+		BRANCH_NAME=__sync__$HASH
+		FILE=$WORK_TREE/.$BRANCH_NAME
+
+		(cd $WORK_TREE && $GIT_COMMAND checkout -b $BRANCH_NAME &> /dev/null)
+		(cd $WORK_TREE && find . \( ! -regex '.*/\..*' \) -type d -empty -exec touch {}/.gitignore \; &> /dev/null)
+		(cd $WORK_TREE && $GIT_COMMAND cat-file -p $HASH > $FILE)
+		(cd $WORK_TREE && $GIT_COMMAND add -u &> /dev/null)
+		(cd $WORK_TREE && $GIT_COMMAND add . -f &> /dev/null)
+		(cd $WORK_TREE && $GIT_COMMAND commit -m "\"getting ready to pull on $TIMESTAMP from $HOSTNAME\"" &> /dev/null)
+
+	fi
+
+	SERVER_BRANCH_NAME=$($GIT_COMMAND rev-parse --abbrev-ref HEAD)
+	if [ "$SERVER_BRANCH_NAME" = "${META[3]}" ]; then
+		echo
+	else
+		echo $SERVER_BRANCH_NAME
+	fi
+
+	rm $WORK_TREE/.__sync__* &> /dev/null
+	exit 0
+fi

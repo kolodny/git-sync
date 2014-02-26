@@ -1,0 +1,21 @@
+#!/bin/sh
+
+echo setting up...
+mkdir repos
+cd repos
+mkdir origin
+cd origin
+git init
+cd ..
+git clone origin/.git local
+cp ../git-hook origin/.git/hooks/post-receive
+chmod +x origin/.git/hooks/post-receive
+cd local
+echo this is from local > test.txt
+git add .
+../../git-sync up
+cd ../origin
+echo this is from origin >> test.txt
+cd ../local
+../../git-sync down
+
